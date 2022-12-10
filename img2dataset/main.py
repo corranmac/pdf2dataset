@@ -31,12 +31,10 @@ def arguments_validator(params):
         forbidden_columns = set(
             [
                 "key",
-                "caption",
+                "title",
                 "url",
-                "width",
-                "height",
-                "original_width",
-                "original_height",
+                "pages",
+                "lang",
                 "status",
                 "error_message",
                 "exif",
@@ -53,36 +51,31 @@ def arguments_validator(params):
 
 def download(
     url_list: str,
-    image_size: int = 256,
-    output_folder: str = "images",
+    output_folder: str = "pdfs",
     processes_count: int = 1,
     resize_mode: str = "border",
-    resize_only_if_bigger: bool = False,
-    upscale_interpolation: str = "lanczos",
-    downscale_interpolation: str = "area",
-    encode_quality: int = 95,
-    encode_format: str = "jpg",
+    download_only_english: bool = False,
+    max_page_number: int = 0,
+    min_page_numer: int = 0,
+    encode_format: str = "pdf",
     skip_reencode: bool = False,
     output_format: str = "files",
     input_format: str = "txt",
     url_col: str = "url",
-    caption_col: Optional[str] = None,
+    title_col: Optional[str] = None,
     thread_count: int = 256,
     number_sample_per_shard: int = 10000,
     extract_exif: bool = True,
     save_additional_columns: Optional[List[str]] = None,
     timeout: int = 10,
     enable_wandb: bool = False,
-    wandb_project: str = "img2dataset",
+    wandb_project: str = "pdf2dataset",
     oom_shard_count: int = 5,
     compute_md5: bool = True,
     distributor: str = "multiprocessing",
     subjob_size: int = 1000,
     retries: int = 0,
     disable_all_reencoding: bool = False,
-    min_image_size: int = 0,
-    max_image_area: float = float("inf"),
-    max_aspect_ratio: float = float("inf"),
     incremental_mode: str = "incremental",
     max_shard_retry: int = 1,
     user_agent_token: Optional[str] = None,
@@ -142,7 +135,7 @@ def download(
         url_list,
         input_format,
         url_col,
-        caption_col,
+        title_col,
         save_additional_columns,
         number_sample_per_shard,
         done_shards,
@@ -162,34 +155,23 @@ def download(
     else:
         raise ValueError(f"Invalid output format {output_format}")
 
-    if encode_format not in ["jpg", "png", "webp"]:
+    if encode_format not in ["pdf"]:
         raise ValueError(f"Invalid encode format {encode_format}")
-    if encode_format == "png":
-        if encode_quality < 0 or encode_quality > 9:
-            raise ValueError(
-                f"For png, encode quality represents compression which must be between 0 and 9, got {encode_quality}"
-            )
 
-    resizer = Resizer(
-        image_size=image_size,
-        resize_mode=resize_mode,
-        resize_only_if_bigger=resize_only_if_bigger,
-        upscale_interpolation=upscale_interpolation,
-        downscale_interpolation=downscale_interpolation,
-        encode_quality=encode_quality,
+    lang_detector = Language_Detector(
         encode_format=encode_format,
         skip_reencode=skip_reencode,
-        disable_all_reencoding=disable_all_reencoding,
         min_image_size=min_image_size,
         max_image_area=max_image_area,
-        max_aspect_ratio=max_aspect_ratio,
+        max_page_number=max_page_number,
+        min_page_number=min_page_number,
     )
 
     downloader = Downloader(
         sample_writer_class=sample_writer_class,
-        resizer=resizer,
+        lang_detector=lang_detector,
         thread_count=thread_count,
-        save_caption=save_caption,
+        save_title=save_title,
         extract_exif=extract_exif,
         output_folder=output_folder,
         column_list=reader.column_list,
