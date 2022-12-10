@@ -19,6 +19,7 @@ import fsspec
 import sys
 import signal
 import os
+import fasttext
 
 logging.getLogger("exifread").setLevel(level=logging.CRITICAL)
 
@@ -84,6 +85,9 @@ def download(
     """Download is the main entry point of img2dataset, it uses multiple processes and download multiple files"""
     config_parameters = dict(locals())
     arguments_validator(config_parameters)
+    if not os.path.exists("./lid.176.bin"):
+        !wget -O ./lid.176.bin https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin
+    lang_model = fasttext.load_model(./lid.176.bin)
 
     def make_path_absolute(path):
         fs, p = fsspec.core.url_to_fs(path)
@@ -166,6 +170,7 @@ def download(
         max_page_number=max_page_number,
         min_page_number=min_page_number,
         download_only_english=download_only_english,
+        lang_model=lang_model,
     )
 
     downloader = Downloader(
