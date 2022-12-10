@@ -55,7 +55,7 @@ def download(
     output_folder: str = "pdfs",
     processes_count: int = 1,
     resize_mode: str = "border",
-    download_only_english: bool = False,
+    save_languages: list = None,
     max_page_number: int = 0,
     min_page_numer: int = 0,
     encode_format: str = "pdf",
