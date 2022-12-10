@@ -54,13 +54,13 @@ class BufferedParquetWriter:
 
 
 class ParquetSampleWriter:
-    """ParquetSampleWriter is a image+caption writer to parquet"""
+    """ParquetSampleWriter is a pdf+title writer to parquet"""
 
     def __init__(
         self,
         shard_id,
         output_folder,
-        save_caption,
+        save_title,
         oom_shard_count,
         schema,
         encode_format,
@@ -73,17 +73,17 @@ class ParquetSampleWriter:
         )
         output_file = f"{output_folder}/{shard_name}.parquet"
         self.buffered_parquet_writer = BufferedParquetWriter(output_file, schema, 100)
-        self.save_caption = save_caption
+        self.save_title = save_title
 
-    def write(self, img_str, key, caption, meta):
+    def write(self, img_str, key, title, meta):
         """Keep sample in memory then write to disk when close() is called"""
         if img_str is not None:
             sample = {"key": key, self.encode_format: img_str}
-            if self.save_caption:
-                sample["txt"] = str(caption) if caption is not None else ""
+            if self.save_title:
+                sample["txt"] = str(title) if title is not None else ""
         else:
             sample = {"key": key, self.encode_format: None}
-            if self.save_caption:
+            if self.save_title:
                 sample["txt"] = None
         sample.update(meta)
         self.buffered_parquet_writer.write(sample)
@@ -93,13 +93,13 @@ class ParquetSampleWriter:
 
 
 class WebDatasetSampleWriter:
-    """WebDatasetSampleWriter is a image+caption writer to webdataset"""
+    """WebDatasetSampleWriter is a pdf+title writer to webdataset"""
 
     def __init__(
         self,
         shard_id,
         output_folder,
-        save_caption,
+        save_title,
         oom_shard_count,
         schema,
         encode_format,
@@ -112,16 +112,16 @@ class WebDatasetSampleWriter:
         fs, output_path = fsspec.core.url_to_fs(output_folder)
         self.tar_fd = fs.open(f"{output_path}/{shard_name}.tar", "wb")
         self.tarwriter = wds.TarWriter(self.tar_fd)
-        self.save_caption = save_caption
+        self.save_title = save_title
         self.buffered_parquet_writer = BufferedParquetWriter(output_folder + "/" + shard_name + ".parquet", schema, 100)
         self.encode_format = encode_format
 
-    def write(self, img_str, key, caption, meta):
+    def write(self, img_str, key, title, meta):
         """write sample to tars"""
         if img_str is not None:
             sample = {"__key__": key, self.encode_format: img_str}
-            if self.save_caption:
-                sample["txt"] = str(caption) if caption is not None else ""
+            if self.save_title:
+                sample["txt"] = str(title) if title is not None else ""
             # some meta data may not be JSON serializable
             for k, v in meta.items():
                 if isinstance(v, np.ndarray):
@@ -137,13 +137,13 @@ class WebDatasetSampleWriter:
 
 
 class TFRecordSampleWriter:
-    """TFRecordSampleWriter is a image+caption writer to TFRecord"""
+    """TFRecordSampleWriter is a pdf+title writer to TFRecord"""
 
     def __init__(
         self,
         shard_id,
         output_folder,
-        save_caption,
+        save_title,
         oom_shard_count,
         schema,
         encode_format,
@@ -179,19 +179,19 @@ class TFRecordSampleWriter:
         )
         self.shard_id = shard_id
         self.tf_writer = TFRecordWriter(f"{output_folder}/{shard_name}.tfrecord")
-        self.save_caption = save_caption
+        self.save_title = save_title
         self.buffered_parquet_writer = BufferedParquetWriter(output_folder + "/" + shard_name + ".parquet", schema, 100)
         self.encode_format = encode_format
 
-    def write(self, img_str, key, caption, meta):
+    def write(self, img_str, key, title, meta):
         """Write a sample using tfrecord writer"""
         if img_str is not None:
             sample = {
                 "key": self._bytes_feature(key.encode()),
                 self.encode_format: self._bytes_feature(img_str),
             }
-            if self.save_caption:
-                sample["txt"] = self._bytes_feature(str(caption) if caption is not None else "")
+            if self.save_title:
+                sample["txt"] = self._bytes_feature(str(title) if title is not None else "")
             for k, v in meta.items():
                 sample[k] = self._feature(v)
             tf_example = self._Example(features=self._Features(feature=sample))
@@ -245,13 +245,13 @@ class TFRecordSampleWriter:
 
 
 class FilesSampleWriter:
-    """FilesSampleWriter is a caption+image writer to files"""
+    """FilesSampleWriter is a pdf+title writer to files"""
 
     def __init__(
         self,
         shard_id,
         output_folder,
-        save_caption,
+        save_title,
         oom_shard_count,
         schema,
         encode_format,
@@ -264,21 +264,21 @@ class FilesSampleWriter:
         self.fs, self.subfolder = fsspec.core.url_to_fs(f"{output_folder}/{shard_name}")
         if not self.fs.exists(self.subfolder):
             self.fs.mkdir(self.subfolder)
-        self.save_caption = save_caption
+        self.save_title = save_title
         self.buffered_parquet_writer = BufferedParquetWriter(output_folder + "/" + shard_name + ".parquet", schema, 100)
         self.encode_format = encode_format
 
-    def write(self, img_str, key, caption, meta):
+    def write(self, img_str, key, title, meta):
         """Write sample to disk"""
         if img_str is not None:
             filename = f"{self.subfolder}/{key}.{self.encode_format}"
             with self.fs.open(filename, "wb") as f:
                 f.write(img_str)
-            if self.save_caption:
-                caption = str(caption) if caption is not None else ""
-                caption_filename = f"{self.subfolder}/{key}.txt"
-                with self.fs.open(caption_filename, "w") as f:
-                    f.write(str(caption))
+            if self.save_title:
+                title = str(title) if title is not None else ""
+                title_filename = f"{self.subfolder}/{key}.txt"
+                with self.fs.open(title_filename, "w") as f:
+                    f.write(str(title))
 
             # some meta data may not be JSON serializable
             for k, v in meta.items():
@@ -297,10 +297,10 @@ class FilesSampleWriter:
 class DummySampleWriter:
     """Does not write"""
 
-    def __init__(self, shard_id, output_folder, save_caption, oom_shard_count, schema, encode_format):
+    def __init__(self, shard_id, output_folder, save_title, oom_shard_count, schema, encode_format):
         pass
 
-    def write(self, img_str, key, caption, meta):
+    def write(self, img_str, key, title, meta):
         pass
 
     def close(self):
