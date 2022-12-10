@@ -1,4 +1,3 @@
-"""the downloader module handles the downloading"""
 
 from multiprocessing.pool import ThreadPool
 from threading import Semaphore
@@ -34,13 +33,13 @@ def is_disallowed(headers, user_agent_token, disallowed_header_directives):
     return False
 
 
-def download_image(row, timeout, user_agent_token, disallowed_header_directives):
+def download_file(row, timeout, user_agent_token, disallowed_header_directives):
     """Download an image with urllib"""
     key, url = row
-    img_stream = None
+    file_stream = None
     user_agent_string = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:72.0) Gecko/20100101 Firefox/72.0"
     if user_agent_token:
-        user_agent_string += f" (compatible; {user_agent_token}; +https://github.com/rom1504/img2dataset)"
+        user_agent_string += f" (compatible; {user_agent_token}; +pdf2dataset)"
     try:
         request = urllib.request.Request(url, data=None, headers={"User-Agent": user_agent_string})
         with urllib.request.urlopen(request, timeout=timeout) as r:
@@ -50,19 +49,19 @@ def download_image(row, timeout, user_agent_token, disallowed_header_directives)
                 disallowed_header_directives,
             ):
                 return key, None, "Use of image disallowed by X-Robots-Tag directive"
-            img_stream = io.BytesIO(r.read())
-        return key, img_stream, None
+            file_stream = io.BytesIO(r.read())
+        return key, file_stream, None
     except Exception as err:  # pylint: disable=broad-except
-        if img_stream is not None:
-            img_stream.close()
+        if file_stream is not None:
+            file_stream.close()
         return key, None, str(err)
 
 
-def download_image_with_retry(row, timeout, retries, user_agent_token, disallowed_header_directives):
+def download_file_with_retry(row, timeout, retries, user_agent_token, disallowed_header_directives):
     for _ in range(retries + 1):
-        key, img_stream, err = download_image(row, timeout, user_agent_token, disallowed_header_directives)
-        if img_stream is not None:
-            return key, img_stream, err
+        key, file_stream, err = download_file(row, timeout, user_agent_token, disallowed_header_directives)
+        if file_stream is not None:
+            return key, file_stream, err
     return key, None, err
 
 
@@ -81,7 +80,7 @@ class Downloader:
     def __init__(
         self,
         sample_writer_class,
-        resizer,
+        lang_detector,
         thread_count,
         save_caption,
         extract_exif,
@@ -97,7 +96,7 @@ class Downloader:
         disallowed_header_directives,
     ) -> None:
         self.sample_writer_class = sample_writer_class
-        self.resizer = resizer
+        self.lang_detector = lang_detector
         self.thread_count = thread_count
         self.save_caption = save_caption
         self.extract_exif = extract_exif
@@ -145,10 +144,8 @@ class Downloader:
             schema.append(pa.field("key", pa.string()))
             .append(pa.field("status", pa.string()))
             .append(pa.field("error_message", pa.string()))
-            .append(pa.field("width", pa.int32()))
-            .append(pa.field("height", pa.int32()))
-            .append(pa.field("original_width", pa.int32()))
-            .append(pa.field("original_height", pa.int32()))
+            .append(pa.field("pages", pa.int32()))
+            .append(pa.field("lang", pa.int32()))
         )
         if self.extract_exif:
             schema = schema.append(pa.field("exif", pa.string()))
@@ -168,7 +165,7 @@ class Downloader:
         failed_to_download = 0
         failed_to_resize = 0
         url_indice = self.column_list.index("url")
-        caption_indice = self.column_list.index("caption") if "caption" in self.column_list else None
+        caption_indice = self.column_list.index("title") if "title" in self.column_list else None
         key_url_list = [(key, x[url_indice]) for key, x in shard_to_dl]
 
         # this prevents an accumulation of more than twice the number of threads in sample ready to resize
@@ -186,15 +183,15 @@ class Downloader:
         sample_writer = self.sample_writer_class(
             shard_id,
             self.output_folder,
-            self.save_caption,
+            self.save_title,
             self.oom_shard_count,
             schema,
             self.encode_format,
         )
         oom_sample_per_shard = math.ceil(math.log10(self.number_sample_per_shard))
         with ThreadPool(self.thread_count) as thread_pool:
-            for key, img_stream, error_message in thread_pool.imap_unordered(
-                lambda x: download_image_with_retry(
+            for key, file_stream, error_message in thread_pool.imap_unordered(
+                lambda x: download_file_with_retry(
                     x,
                     timeout=self.timeout,
                     retries=self.retries,
@@ -211,10 +208,8 @@ class Downloader:
                         "key": str_key,
                         "status": None,
                         "error_message": error_message,
-                        "width": None,
-                        "height": None,
-                        "original_width": None,
-                        "original_height": None,
+                        "pages": None,
+                        "lang": None,
                     }
                     if self.extract_exif:
                         meta["exif"] = None
@@ -233,18 +228,16 @@ class Downloader:
                         )
                         semaphore.release()
                         continue
-                    img_stream.seek(0)
+                    file_stream.seek(0)
                     (
                         img,
-                        width,
-                        height,
-                        original_width,
-                        original_height,
+                        pages,
+                        lang,
                         error_message,
-                    ) = self.resizer(img_stream)
+                    ) = self.langdect(file_stream)
                     if error_message is not None:
-                        failed_to_resize += 1
-                        status = "failed_to_resize"
+                        failed_to_detect_lang += 1
+                        status = "failed_to_detect_lang"
                         status_dict.increment(error_message)
                         meta["status"] = status
                         meta["error_message"] = error_message
@@ -254,8 +247,8 @@ class Downloader:
                             sample_data[caption_indice] if caption_indice is not None else None,
                             meta,
                         )
-                        img_stream.close()
-                        del img_stream
+                        file_stream.close()
+                        del file_stream
                         semaphore.release()
                         continue
                     successes += 1
@@ -264,11 +257,11 @@ class Downloader:
 
                     if self.extract_exif:
                         try:
-                            img_stream.seek(0)
+                            file_stream.seek(0)
                             exif = json.dumps(
                                 {
                                     k: str(v).strip()
-                                    for k, v in exifread.process_file(img_stream, details=False).items()
+                                    for k, v in exifread.process_file(file_stream, details=False).items()
                                     if v is not None
                                 }
                             )
@@ -277,16 +270,14 @@ class Downloader:
                         meta["exif"] = exif
 
                     if self.compute_md5:
-                        img_stream.seek(0)
-                        meta["md5"] = hashlib.md5(img_stream.read()).hexdigest()
+                        file_stream.seek(0)
+                        meta["md5"] = hashlib.md5(file_stream.read()).hexdigest()
 
                     meta["status"] = status
-                    meta["width"] = width
-                    meta["height"] = height
-                    meta["original_width"] = original_width
-                    meta["original_height"] = original_height
-                    img_stream.close()
-                    del img_stream
+                    meta["pages"] = pages
+                    meta["lang"] = lang
+                    file_stream.close()
+                    del file_stream
 
                     sample_writer.write(
                         img,
@@ -311,7 +302,7 @@ class Downloader:
             count,
             successes,
             failed_to_download,
-            failed_to_resize,
+            failed_to_detect_lang,
             start_time,
             end_time,
             status_dict,
