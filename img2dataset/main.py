@@ -165,6 +165,7 @@ def download(
         max_image_area=max_image_area,
         max_page_number=max_page_number,
         min_page_number=min_page_number,
+        download_only_english=download_only_english,
     )
 
     downloader = Downloader(
